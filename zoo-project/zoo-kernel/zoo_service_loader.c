@@ -25,6 +25,8 @@
 extern "C" int yylex ();
 extern "C" int crlex ();
 
+
+
 #ifdef META_DB
 #include "ogrsf_frmts.h"
 #if GDAL_VERSION_MAJOR >= 2
@@ -190,6 +192,351 @@ extern "C"
 #endif
 
 
+
+
+
+///////////////////////////////////////////
+
+
+
+// T2
+int getUserWorkspacePath(maps* m,char* oldPath,char* newPath,int maxSize){
+  map *userMap = getMapFromMaps (m, "zooUser", "user");
+  map *userWorkspace = getMapFromMaps (m, "userServices", "path"); 
+  memset(newPath,0,maxSize);
+
+  if (userMap && strcmp(userMap->value,"anonymous") == 0 ){
+    if (oldPath){
+      snprintf (newPath,maxSize, "%s", oldPath);
+	}
+  } else if (userMap && userMap->value && userWorkspace && userWorkspace->value){
+    snprintf (newPath,maxSize, "%s/%s", userWorkspace->value,userMap->value);
+  } else {
+    if (oldPath)
+      snprintf (newPath,maxSize, "%s", oldPath);
+  }
+  return 0;
+}
+
+// T2
+size_t calcDecodeLength(const char* b64input) { //Calculates the length of a decoded string
+	size_t len = strlen(b64input),
+		padding = 0;
+	if (b64input[len-1] == '=' && b64input[len-2] == '=') //last two chars are =
+		padding = 2;
+	else if (b64input[len-1] == '=') //last char is =
+		padding = 1;
+
+	return (len*3)/4 - padding;
+}
+
+// T2
+int createUserSpace(maps* conf,const char* User){
+  int ret=0;
+  char* thePath=(char*)malloc(1024);
+  memset(thePath,'\0',1024);
+  getUserWorkspacePath(conf,NULL,thePath,1023);
+
+  char* script=(char*)malloc(1024*3);
+  memset(script,'\0',1024*3);
+
+  char* statusInfoPath=(char*)malloc(1024)  ;
+  memset(statusInfoPath,'\0',1024);
+
+  map *statusInfoPathMAP = getMapFromMaps (conf, "main", "tmpPath");
+  if (statusInfoPathMAP && statusInfoPathMAP->value && strlen(statusInfoPathMAP->value)>0){
+    sprintf(statusInfoPath,"%s/statusInfos/%s",statusInfoPathMAP->value,User);
+  }else{
+      sprintf(statusInfoPath,"/var/www/_run/res/statusInfos/%s",User);
+  }
+
+
+  map *userMap = getMapFromMaps (conf, "userServices", "userSpaceScript");
+
+  if(userMap && userMap->value && strlen(userMap->value)>0){
+    sprintf(script,"%s \"%s\" \"%s\" \"%s\"    1>/dev/null",userMap->value,thePath,statusInfoPath,User);
+  }else{
+    sprintf(script,"/opt/userWorkspaceScripts/prepareUserSpace.sh \"%s\" \"%s\" \"%s\" 1>/dev/null",thePath,statusInfoPath,User);
+  }
+
+  fprintf(stderr,"creation script: %s \n",script);
+
+  int y=system(script);
+//  if(!exitFolder(thePath)){
+//    int a=zMkdir(thePath,0777);
+//  }else{
+//  }
+//
+  free(statusInfoPath);
+  free(thePath);
+  free(script);
+
+  return y;
+}
+
+// T2
+int Base64Decode(char* b64message, unsigned char** buffer, size_t* length) { //Decodes a base64 encoded string
+	BIO *bio, *b64;
+
+	int decodeLen = calcDecodeLength(b64message);
+	*buffer = (unsigned char*)malloc(decodeLen + 1);
+	(*buffer)[decodeLen] = '\0';
+
+	bio = BIO_new_mem_buf(b64message, -1);
+	b64 = BIO_new(BIO_f_base64());
+	bio = BIO_push(b64, bio);
+
+	BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL); //Do not use newlines to flush buffer
+	*length = BIO_read(bio, *buffer, strlen(b64message));
+	// assert(*length == decodeLen); //length should equal decodeLen, else something went horribly wrong
+	BIO_free_all(bio);
+
+	return (0); //success
+}
+
+// T2
+int addUserToMap(maps* conf){
+  int ret=0;
+  int ei = 1;
+  int canContinue=false;
+  char **orig = environ;
+  char *s=*orig;
+  char* username=NULL;
+  char* JWT=NULL;
+
+  // Retrieving the default user from the main.cfg
+  char* anonymousUser=NULL;
+  if (conf){
+    maps* anonymousMap=getMaps(conf,"userServices");
+    if (anonymousMap){
+      map* defaultUser=getMap(anonymousMap->content,"defaultUser");
+      if (defaultUser){
+        anonymousUser=zStrdup(defaultUser->value);
+      }
+    }
+  }
+
+  
+  if(orig!=NULL)
+    for (; s; ei++ ) {
+	
+	  // retrieving user workspace
+      if(strstr(s,"=")!=NULL && strlen(strstr(s,"="))>1){
+        if (strstr(s,"REDIRECT_REDIRECT_USER_WORKSPACE")!=NULL){
+          char* baseU=strchr(s,'=');
+          if (strlen(baseU)>1){
+            char* workspace= ++baseU;
+            fprintf(stderr,"zooUser: %s\n",workspace);
+            username = zStrdup(workspace);
+			// creating a zooUser map
+			// the map will contain the user name and its permissions
+            maps *_tmpMaps = createMaps("zooUser");
+            if(_tmpMaps->content == NULL)
+              _tmpMaps->content = createMap ("user",workspace);
+            else
+              addToMap (_tmpMaps->content,"user",workspace);
+
+            if( strcmp(anonymousUser,workspace)==0 ){
+              // it is  anonymous, can only reads
+              // rwx
+              map *theGrants = createMap("grant","1--");
+              addMapToMap(&_tmpMaps->content,theGrants);
+            }else{
+              // it is ok!
+              map *theGrants = createMap("grant","111");
+              addMapToMap(&_tmpMaps->content,theGrants);
+            }
+
+			// adding the zooUser map to the other maps
+            if(conf){
+              addMapsToMaps (&conf, _tmpMaps);
+            }
+          }
+        }
+
+		/* T2 not needed for the moment
+        if(strstr(s,"HTTP_AUTHORIZATION")!=NULL && strlen(strstr(s,"="))>1  && strstr(s,"REDIRECT_HTTP_AUTHORIZATION")==NULL) {
+            char *baseU = strchr(s, '=');
+            if (baseU) {
+                char *baseS = strchr(++baseU, ' ');
+                if (baseS) {
+                    *baseS = '\0';
+                    fprintf(stderr, "**** %s\n", baseU);
+                    if (strcmp(baseU, "Bearer") == 0) {
+                        canContinue = true;
+                    }
+                    *baseS = ' ';
+                    if (canContinue) {
+                        while (*(++baseS) == ' ');
+                        fprintf(stderr, ">%s<\n", baseS);
+                        JWT = zStrdup(baseS);
+                    }
+                }
+            }
+        }
+
+
+        if(false && strstr(s,"HTTP_AUTHORIZATION")!=NULL && strlen(strstr(s,"="))>1  && strstr(s,"REDIRECT_HTTP_AUTHORIZATION")==NULL){
+          // fprintf(stderr,"--> %s=%s \n", tmpName1, tmpValue );
+          char* baseU=strchr(s,'=');
+          if (baseU){
+            char* baseS=strchr(++baseU,' ');
+            if (baseS){
+              *baseS='\0';
+              fprintf(stderr,"**** %s\n",baseU);
+              if (strcmp(baseU,"Bearer")==0){
+                canContinue=true;
+              }
+              *baseS=' ';
+              if (canContinue){
+                while (*(++baseS)==' ');
+                fprintf(stderr,">%s<\n",baseS);                
+
+                char* HEADER=baseS;
+                char* PAYLOAD=NULL;
+                char* VERIFY_SIGNATURE=NULL;
+
+                char* tmpP=strchr(HEADER,'.');
+                if (tmpP){
+                  *tmpP='\0';
+                  PAYLOAD=tmpP+1;                 
+                  tmpP=strchr(PAYLOAD ,'.');
+                  if (tmpP){
+                    *tmpP='\0';
+                    VERIFY_SIGNATURE=tmpP+1;
+                    int bufferLen=0;
+
+                    size_t nPAYLOAD=(strlen(PAYLOAD)+2)*sizeof (char);
+                    char* cPAYLOAD=(char*)malloc(nPAYLOAD);
+                    memset(cPAYLOAD,'\0',nPAYLOAD);
+                    memcpy(cPAYLOAD,PAYLOAD,(strlen(PAYLOAD))*sizeof (char));
+                    *(cPAYLOAD+strlen(PAYLOAD)) = '=';
+
+                    unsigned char* buffer=NULL;
+                    size_t theLen=0;
+                    Base64Decode(cPAYLOAD,&buffer,&theLen);
+
+                    fprintf(stderr,"PAYLOAD %s\n",PAYLOAD);
+                    fprintf(stderr,"PAYLOAD %s\n",cPAYLOAD);
+                    fprintf(stderr,"buffer %s\n",(char*)buffer);
+
+                    struct json_object *jobj;
+                    jobj = json_tokener_parse((char*)buffer);
+
+                    if(jobj){
+                      fprintf(stderr,"jobj from str:\n---\n%s\n---\n", json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_SPACED | JSON_C_TO_STRING_PRETTY));                          
+                      json_object* pct_claims=NULL;
+                      if(json_object_object_get_ex(jobj,"pct_claims",&pct_claims)!=FALSE){
+
+                        json_object* user_names=NULL;
+                        if(json_object_object_get_ex(pct_claims,"user_name",&user_names)!=FALSE){                     
+                          int arraylen;
+                          json_object  *medi_array=NULL,*medi_array_obj=NULL;
+                          arraylen = json_object_array_length(user_names);
+                          if (arraylen>0){
+                            medi_array_obj=json_object_array_get_idx(user_names, 0);
+
+                            int uLen=json_object_get_string_len(medi_array_obj) * sizeof(char);
+
+                            if (uLen>0){
+                              username=(char*)malloc(uLen+1);
+                              memset(username,'\0',uLen+1);
+                              memcpy(username,json_object_get_string(medi_array_obj),uLen);
+                              fprintf(stderr,">>>>%s<<<<<=====>>>>>\n",username);
+
+                              maps *_tmpMaps = createMaps("eoepcaUser");
+                              if(_tmpMaps->content == NULL)
+                                  _tmpMaps->content = createMap ("user",username);
+                                else
+                                  addToMap (_tmpMaps->content,"user",username);
+
+                                if( strcmp(anonymousUser,username)==0 ){
+                                  // it is  anonymous, can only reads
+                                  // rwx
+                                  map *theGrants = createMap("grant","1--");
+                                  addMapToMap(&_tmpMaps->content,theGrants);
+                                }else{
+                                  // it is ok!
+                                  map *theGrants = createMap("grant","111");
+                                  addMapToMap(&_tmpMaps->content,theGrants);
+                                }
+
+                              if(conf){
+                                addMapsToMaps (&conf, _tmpMaps);
+                              }
+
+                            }
+                          }
+                        }
+                      }
+                    }else{
+                      fprintf(stderr,"can't convert the json string >%s< \n",(char*)buffer);
+                      ret=1;
+                    }
+
+                    if(jobj){
+                      json_object_put(jobj);
+                    }
+                    free(cPAYLOAD);
+                    free(buffer);
+                  }
+                }
+              }
+            }
+          }
+        }*/
+      }
+      s = *(orig+ei);
+    }
+
+  maps* userMap=getMaps(conf,"zooUser");
+
+  // if the URI does not contain any workspace, then create an anonymous user map
+  if(!userMap && ret==0){
+    maps *_tmpMaps = createMaps("zooUser");
+    _tmpMaps->content = createMap ("user", (anonymousUser?anonymousUser:"anonymous"));
+    map *theGrants = createMap("grant","1--");
+    addMapToMap(&_tmpMaps->content,theGrants);
+    addMapsToMaps (&conf, _tmpMaps);
+    if(username){
+      free(username);
+    }
+    username=zStrdup( anonymousUser?anonymousUser:"anonymous" );
+  }
+
+  /* T2 not needed for the moment 
+  if(userMap && ret==0) {
+        if (JWT){
+            map *theYWT = createMap("jwt",zStrdup(JWT));
+            addMapToMap(&userMap->content,theYWT);
+        }
+  }
+  */
+else{
+  int sc=createUserSpace(conf,username);
+}
+
+  if(username){
+    free(username);
+  }
+
+  if(anonymousUser){
+    free(anonymousUser);
+  }
+
+
+  /* T2 not needed for the moment
+  if (JWT){
+      free(JWT);
+  }
+  */
+
+  return ret;
+}
+/////////////////////////////////////////////
+
+
+
 /**
  * Replace a char by another one in a string
  *
@@ -329,12 +676,21 @@ bool compareCnt(maps* conf, const char* field, const char* type){
  * @see inheritance, readServiceFile
  */
 int
-recursReaddirF ( maps * m, registry *r, void* doc1, void* n1, char *conf_dir,
+recursReaddirF ( maps * m, registry *r, void* doc1, void* n1, char *conf_dir_,
 		 //( maps * m, registry *r, xmlDocPtr doc, xmlNodePtr n, char *conf_dir,
 		 char *prefix, int saved_stdout, int level,
 		 void (func) (registry *, maps *, void*, void*, service *) )
 		 //void (func) (registry *, maps *, xmlDocPtr, xmlNodePtr, service *) )
 {
+
+  // if userWorkspace is present in the map, conf_dir will
+  // point to the user services path else it will point to
+  // the default service path
+  char conf_dir[1024];
+  getUserWorkspacePath(m,conf_dir_,conf_dir,1024);
+  fprintf (stderr, "userWorkspace path: %s\n", conf_dir);
+
+  ///// 
   struct dirent *dp;
   int scount = 0;
   xmlDocPtr doc=(xmlDocPtr) doc1;
@@ -1933,6 +2289,14 @@ runRequest (map ** inputs)
   dumpMaps (m);
   fprintf (stderr, "***** END MAPS\n");
 #endif
+
+
+
+  // T2
+  addUserToMap(m);
+  maps* userMap=getMaps(m,"zooUser");
+
+
 
   map *getPath = getMapFromMaps (m, "main", "gettextPath");
   if (getPath != NULL)
@@ -4016,3 +4380,4 @@ runRequest (map ** inputs)
 
   return 0;
 }
+
