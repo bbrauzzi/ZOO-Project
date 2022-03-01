@@ -323,6 +323,10 @@ COPY --from=demos /zoo-project/examples/data/ /usr/com/zoo-project/
 COPY --from=demos /zoo-project/examples/ /var/www/html/
 COPY --from=demos /zoo-project/swagger-ui /var/www/html/swagger-ui
 
+# user workspace
+RUN mkdir -p /opt/zooservices_user && chmod -R 700 /opt/zooservices_user && chown -R www-data /opt/zooservices_user
+COPY --from=builder1 /zoo-project/zoo-project/zoo-kernel/scripts/prepareUserSpace.sh /opt/userWorkspaceScripts/prepareUserSpace.sh
+RUN chmod +x /opt/userWorkspaceScripts/prepareUserSpace.sh 
 
 RUN set -ex \
     && apt-get update && apt-get install -y --no-install-recommends $RUN_DEPS $BUILD_DEPS \
