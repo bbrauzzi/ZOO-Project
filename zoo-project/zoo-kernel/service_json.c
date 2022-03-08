@@ -722,6 +722,18 @@ extern "C" {
     else
       res=(json_object*) nc0;
       
+
+    int wpLen=0;
+    char* wp=NULL;
+    map* eoUserMap=getMapFromMaps(m,"zooUser","user");
+    if (eoUserMap && eoUserMap->value){
+      wpLen=strlen(eoUserMap->value);
+      wp=(char*)malloc((10+wpLen)*sizeof(char));
+      memset(wp,0,(10+wpLen)*sizeof(char));
+      sprintf(wp,"/%s",eoUserMap->value);
+    }
+
+
     map* tmpMap0=getMapFromMaps(m,"lenv","level");
     char* rUrl=serv->name;
     if(tmpMap0!=NULL && atoi(tmpMap0->value)>0){
@@ -825,13 +837,14 @@ extern "C" {
       json_object_object_add(res2,"type",json_object_new_string("application/json"));
       map* tmpUrl=getMapFromMaps(m,"openapi","rootUrl");
       char* tmpStr=(char*) malloc((strlen(tmpUrl->value)+strlen(rUrl)+13)*sizeof(char));
-      sprintf(tmpStr,"%s/processes/%s",tmpUrl->value,rUrl);
+      sprintf(tmpStr,"%s%s/processes/%s",(wpLen>0?wp:""),tmpUrl->value,rUrl);
       if(pmTmp!=NULL && strncasecmp(pmTmp->value,"desc",4)!=0){
 	json_object_object_add(res2,"title",json_object_new_string("Execute End Point"));
 	json_object_object_add(res3,"title",json_object_new_string("Execute End Point"));
 	char* tmpStr1=zStrdup(tmpStr);
 	tmpStr=(char*) realloc(tmpStr,(strlen(tmpStr1)+11)*sizeof(char));
 	sprintf(tmpStr,"%s/execution",tmpStr1);
+  
 	free(tmpStr1);
       }else{
 	json_object_object_add(res2,"title",json_object_new_string("Process Description"));
@@ -1825,12 +1838,53 @@ extern "C" {
       zStatStruct zsFStatus;
       int iS=zStat(pacTmp, &zsFStatus);
       if(iS==0 && zsFStatus.st_size>0){
-	map* tmpPath1 = getMapFromMaps (conf, "main", "tmpUrl");
-	char* pacTmpUrl=(char*)malloc((strlen(tmpPath1->value)+strlen(cIdentifier->value)+strlen(sessId->value)+8)*sizeof(char));;
-	sprintf(pacTmpUrl,"%s/%s_%s.json",tmpPath1->value,
-		cIdentifier->value,sessId->value);
-	if(getMapFromMaps(conf,"lenv","gs_location")==NULL)
+	// map* tmpPath1 = getMapFromMaps (conf, "main", "tmpUrl");
+	// char* pacTmpUrl=(char*)malloc((strlen(tmpPath1->value)+strlen(cIdentifier->value)+strlen(sessId->value)+8)*sizeof(char));;
+	// sprintf(pacTmpUrl,"%s/%s_%s.json",tmpPath1->value,
+	// 	cIdentifier->value,sessId->value);
+
+
+
+
+
+    FILE* foutput=fopen(pacTmp,"w+");
+    fprintf(stderr,"/////////////////////%s//////////////////////// \n",pacTmp );
+
+    char pacTmpUrl[1024];
+    if(foutput!=NULL){
+      fclose(foutput);
+      map* tmpPath1 = getMapFromMaps (conf, "main", "tmpUrl");
+
+      int wpLen=0;
+      char* wp=NULL;
+      map* eoUserMap=getMapFromMaps(conf,"zooUser","user");
+      if (eoUserMap && eoUserMap->value){
+        wpLen=strlen(eoUserMap->value);
+        wp=(char*)malloc((10+wpLen)*sizeof(char));
+        memset(wp,0,(10+wpLen)*sizeof(char));
+        sprintf(wp,"/%s",eoUserMap->value);
+      }
+
+      sprintf(pacTmpUrl,"%s%s/%s_%s.json",
+              (wpLen>0?wp:""),
+              tmpPath1->value,
+	      cIdentifier->value,sessId->value);
+
+      fprintf(stderr,"/////////////////////%s//////////////////////// \n",pacTmpUrl );
+
+    }
+
+
+
+	
+  
+  
+  if(getMapFromMaps(conf,"lenv","gs_location")==NULL)
 	  setMapInMaps(conf,"headers","Location",pacTmpUrl);
+
+
+
+
 	free(pacTmpUrl);
       }
       free(pacTmp);
@@ -1915,9 +1969,22 @@ extern "C" {
     map *tmpPath = getMapFromMaps (conf, "openapi", "rootUrl");
     map *sessId = getMapFromMaps (conf, "lenv", "path");
 
+    int wpLen=0;
+    char* wp=NULL;
+    map* eoUserMap=getMapFromMaps(conf,"zooUser","user");
+    if (eoUserMap && eoUserMap->value){
+      wpLen=strlen(eoUserMap->value);
+      wp=(char*)malloc((10+wpLen)*sizeof(char));
+      memset(wp,0,(10+wpLen)*sizeof(char));
+      sprintf(wp,"/%s",eoUserMap->value);
+    }
+
+
+
     char *Url0=(char*) malloc((strlen(tmpPath->value)+
 			       strlen(sessId->value)+2)*sizeof(char));
-    sprintf(Url0,"%s/%s",
+    sprintf(Url0,"%s%s/%s",
+      (wpLen>0?wp:""),
 	    tmpPath->value,
 	    sessId->value);
     json_object_array_add(res,createALink(conf,"self","application/json",Url0));
@@ -1926,7 +1993,8 @@ extern "C" {
     if(pmHtml!=NULL && strcmp(pmHtml->value,"true")==0){
       char *Url1=(char*) malloc((strlen(tmpPath->value)+
 				 strlen(sessId->value)+7)*sizeof(char));
-      sprintf(Url1,"%s/%s.html",
+      sprintf(Url1,"%s%s/%s.html",
+        (wpLen>0?wp:""),
 	      tmpPath->value,
 	      sessId->value);
       json_object_array_add(res,createALink(conf,"alternate","text/html",Url1));
@@ -1973,12 +2041,35 @@ extern "C" {
   int createStatusLinks(maps* conf,int result,json_object* obj){
     json_object* res=json_object_new_array();
     map *tmpPath = getMapFromMaps (conf, "openapi", "rootUrl");
+    map *cIdentifier = getMapFromMaps (conf, "lenv", "oIdentifier");
     map *sessId = getMapFromMaps (conf, "lenv", "usid");
     if(sessId==NULL){
       sessId = getMapFromMaps (conf, "lenv", "gs_usid");
     }
-    char *Url0=(char*) malloc((strlen(tmpPath->value)+
+
+
+    int wpLen=0;
+    char* wp=NULL;
+    map* eoUserMap=getMapFromMaps(conf,"zooUser","user");
+    if (eoUserMap && eoUserMap->value){
+      wpLen=strlen(eoUserMap->value);
+      wp=(char*)malloc((10+wpLen)*sizeof(char));
+      memset(wp,0,(10+wpLen)*sizeof(char));
+      sprintf(wp,"/%s",eoUserMap->value);
+    }else{
+      fprintf(stderr,"///////////////////////////////////////////// \n" );
+      fprintf(stderr,"workspace did not define\n");
+      fprintf(stderr,"///////////////////////////////////////////// \n" );
+    }
+
+
+    //char *Url0=(char*) malloc((strlen(tmpPath->value)+
+		//	       strlen(sessId->value)+18)*sizeof(char));
+    char *Url0=(char*) malloc(wpLen*(strlen(tmpPath->value)+
+			       strlen(cIdentifier->value)+
 			       strlen(sessId->value)+18)*sizeof(char));
+
+
     int needResult=-1;
     char *message, *status;
     sprintf(Url0,"%s/jobs/%s",
@@ -2032,6 +2123,7 @@ extern "C" {
   char* json_getStatusFilePath(maps* conf){
     map *tmpPath = getMapFromMaps (conf, "main", "tmpPath");
     map *sessId = getMapFromMaps (conf, "lenv", "usid");
+    map *cIdentifier = getMapFromMaps (conf, "lenv", "oIdentifier");
     if(sessId!=NULL){
       sessId = getMapFromMaps (conf, "lenv", "gs_usid");
       if(sessId==NULL)
@@ -2041,9 +2133,52 @@ extern "C" {
     
     char *tmp1=(char*) malloc((strlen(tmpPath->value)+
 			       strlen(sessId->value)+14)*sizeof(char));
-    sprintf(tmp1,"%s/%s_status.json",
-	    tmpPath->value,
-	    sessId->value);
+
+    // sprintf(tmp1,"%s/%s_status.json",
+	  //   tmpPath->value,
+	  //   sessId->value);
+    // return tmp1;
+
+
+    map *userMap = getMapFromMaps (conf, "zooUser", "user");
+    if (userMap && userMap->value && strlen(userMap->value)>0 ){
+      sprintf(tmp1,"%s/statusInfos/%s/%s",
+              tmpPath->value,userMap->value,
+              cIdentifier->value);
+      fprintf(stderr,"--------------1--%s %s\n",tmp1,cIdentifier->value);
+    }else{
+      sprintf(tmp1,"%s/statusInfos/%s",
+              tmpPath->value,
+              cIdentifier->value);
+      fprintf(stderr,"--------------2--%s %s\n",tmp1,cIdentifier->value);
+
+    }
+
+    if(mkdir(tmp1,0777) != 0 && errno != EEXIST){
+      fprintf(stderr,"Issue creating directory %s\n",tmp1);
+      return NULL;
+    }
+    free(tmp1);
+    tmp1=(char*) malloc((strlen(tmpPath->value)+
+			 strlen(cIdentifier->value)+
+			 strlen(sessId->value)+20)*sizeof(char) + (1024*sizeof(char)));
+    int needResult=0;
+    char *message, *rstatus;
+
+
+
+    if (userMap && userMap->value && strlen(userMap->value)>0 ){
+      sprintf(tmp1,"%s/statusInfos/%s/%s/%s.json",
+              tmpPath->value,userMap->value,
+              cIdentifier->value,
+              sessId->value);
+    }else{
+      sprintf(tmp1,"%s/statusInfos/%s/%s.json",
+              tmpPath->value,
+              cIdentifier->value,
+              sessId->value);
+    }
+
     return tmp1;
   }
 
